@@ -19,6 +19,7 @@ from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 from torch import nn
 
 from models import GAT
+from tqdm import tqdm
 from utils import BatchSampler, DataLoaderWrapper
 
 device = None
@@ -86,7 +87,7 @@ def train(_args, model, dataloader, _labels, _train_idx, criterion, optimizer, _
 
     loss_sum, total = 0, 0
 
-    for _input_nodes, output_nodes, subgraphs in dataloader:
+    for _input_nodes, output_nodes, subgraphs in tqdm(dataloader):
         subgraphs = [b.to(device) for b in subgraphs]
         new_train_idx = list(range(len(output_nodes)))
 
@@ -115,7 +116,7 @@ def evaluate(_args, model, dataloader, labels, train_idx, val_idx, test_idx, cri
     eval_times = 1
 
     for _ in range(eval_times):
-        for _input_nodes, output_nodes, subgraphs in dataloader:
+        for _input_nodes, output_nodes, subgraphs in tqdm(dataloader):
             subgraphs = [b.to(device) for b in subgraphs]
 
             pred = model(subgraphs)
@@ -142,7 +143,8 @@ def evaluate(_args, model, dataloader, labels, train_idx, val_idx, test_idx, cri
 def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running):
     evaluator_wrapper = lambda pred, labels: evaluator.eval({"y_pred": pred, "y_true": labels})["rocauc"]
 
-    train_batch_size = (len(train_idx) + 9) // 10
+    # train_batch_size = (len(train_idx) + 9) // 10
+    train_batch_size = args.batsize
     # batch_size = len(train_idx)
     train_sampler = MultiLayerNeighborSampler([16 for _ in range(args.n_layers)])
     # sampler = MultiLayerFullNeighborSampler(args.n_layers)
@@ -152,7 +154,7 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
             train_idx.cpu(),
             train_sampler,
             batch_sampler=BatchSampler(len(train_idx), batch_size=train_batch_size),
-            num_workers=4,
+            num_workers=args.numworkers,
         )
     )
 
@@ -163,8 +165,8 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
             graph.cpu(),
             torch.cat([train_idx.cpu(), val_idx.cpu(), test_idx.cpu()]),
             eval_sampler,
-            batch_sampler=BatchSampler(graph.number_of_nodes(), batch_size=32768),
-            num_workers=4,
+            batch_sampler=BatchSampler(graph.number_of_nodes(), batch_size=train_batch_size),
+            num_workers=args.numworkers,
         )
     )
 
@@ -288,6 +290,8 @@ def main():
     argparser.add_argument("--eval-every", type=int, default=5, help="evaluate every EVAL_EVERY epochs")
     argparser.add_argument("--log-every", type=int, default=5, help="log every LOG_EVERY epochs")
     argparser.add_argument("--plot-curves", action="store_true", help="plot learning curves")
+    argparser.add_argument("--batsize", type=int, default=1000)
+    argparser.add_argument("--numworkers", type=int, default=0)
     args = argparser.parse_args()
 
     if args.cpu:
